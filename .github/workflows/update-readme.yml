@@ -1,0 +1,101 @@
+name: Update README Index
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.antigravity/agents/**'
+      - '.antigravity/system-prompts/**'
+      - 'README.md'
+  workflow_dispatch:
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Generate agent index
+        run: |
+          cat > /tmp/generate_index.js << 'EOF'
+          const fs = require('fs');
+          const path = require('path');
+          
+          const agentsDir = './.antigravity/agents';
+          const categories = fs.readdirSync(agentsDir);
+          
+          let agentIndex = '\n## Agents Directory\n\n';
+          
+          categories.sort().forEach(category => {
+            const categoryPath = path.join(agentsDir, category);
+            const stats = fs.statSync(categoryPath);
+            
+            if (stats.isDirectory()) {
+              const files = fs.readdirSync(categoryPath).filter(f => f.endsWith('.md'));
+              
+              if (files.length > 0) {
+                agentIndex += `### ${category.replace(/-/g, ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}\n\n`;
+                
+                files.sort().forEach(file => {
+                  const filePath = path.join(categoryPath, file);
+                  const content = fs.readFileSync(filePath, 'utf8');
+                  const titleMatch = content.match(/^# (.+)$/m);
+                  const title = titleMatch ? titleMatch[1] : file.replace('.md', '');
+                  const roleMatch = content.match(/## Role\n\n(.+?)(?:\n\n|$)/s);
+                  const roleDesc = roleMatch ? roleMatch[1].replace(/\n/g, ' ').substring(0, 100) + '...' : 'See file for details';
+                  const fileLink = `.antigravity/agents/${category}/${file}`;
+                  
+                  agentIndex += `- **[${title}](${fileLink})**: ${roleDesc}\n`;
+                });
+                
+                agentIndex += '\n';
+              }
+            }
+          });
+          
+          console.log(agentIndex);
+          fs.writeFileSync('/tmp/agent_index.txt', agentIndex);
+          EOF
+          
+          node /tmp/generate_index.js > /tmp/index_output.txt
+          cat /tmp/index_output.txt
+      
+      - name: Update README
+        run: |
+          # Read the agent index
+          AGENT_INDEX=$(cat /tmp/index_output.txt)
+          
+          # Read current README
+          README_CONTENT=$(cat README.md)
+          
+          # Check if marker exists, if not add it before the end
+          if grep -q "<!-- AGENT_INDEX_START -->" README.md; then
+            # Replace content between markers
+            sed -i '/<!-- AGENT_INDEX_START -->/,/<!-- AGENT_INDEX_END -->/c\<!-- AGENT_INDEX_START -->\'"$(echo "$AGENT_INDEX" | sed 's/[\/&]/\\&/g')"$'\n'"<!-- AGENT_INDEX_END -->" README.md
+          else
+            # Add markers at end of file before License section if it exists
+            if grep -q "## License" README.md; then
+              sed -i '/## License/i\<!-- AGENT_INDEX_START -->\n'"$(echo "$AGENT_INDEX" | sed 's/[\/&]/\\&/g')"$'\n'"<!-- AGENT_INDEX_END -->" README.md
+            else
+              echo "" >> README.md
+              echo "<!-- AGENT_INDEX_START -->" >> README.md
+              echo "$AGENT_INDEX" >> README.md
+              echo "<!-- AGENT_INDEX_END -->" >> README.md
+            fi
+          fi
+      
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          if git diff --quiet; then
+            echo "No changes to commit"
+          else
+            git add README.md
+            git commit -m "chore: auto-update README agent index"
+            git push
+          fi
