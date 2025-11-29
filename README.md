@@ -34,6 +34,9 @@ This repository provides:
 └── README.md                  # This file
 ```
 
+<!-- AGENT_INDEX_START -->
+   <!-- AGENT_INDEX_END -->
+
 ## Agents
 
 ### Architecture & Planning
